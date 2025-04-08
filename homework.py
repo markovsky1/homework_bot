@@ -8,6 +8,7 @@ from http import HTTPStatus
 import requests
 from dotenv import load_dotenv
 from telebot import TeleBot
+from telebot.apihelper import ApiException
 
 from exceptions import MissingTokenError, TelegramError, APIResponseError
 
@@ -73,9 +74,6 @@ def check_tokens():
     }
     missing_tokens = [key for key, value in TOKENS.items() if not value]
     if missing_tokens:
-        logger.critical(
-            f'Отсутствуют переменные окружения: {", ".join(missing_tokens)}'
-        )
         raise MissingTokenError(
             f'Отсутствуют переменные окружения: {", ".join(missing_tokens)}'
         )
@@ -91,12 +89,12 @@ def send_message(bot, message):
     """
     try:
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
-        logger.debug(f'Бот отправил сообщение "{message}"')
-    except Exception as error:
-        logger.error(f'Сбой при отправке сообщения: {error}')
+    except (ApiException, requests.RequestException) as error:
         raise TelegramError(
             f'Сбой при отправке сообщения: {error}'
         )
+    logger.debug(f'Бот отправил сообщение "{message}"')
+    return True
 
 
 def get_api_answer(timestamp):
@@ -106,31 +104,28 @@ def get_api_answer(timestamp):
     successful, it should return an API response, converting it from the JSON
     format to Python data types.
     """
+    params = {
+        'url': ENDPOINT,
+        'headers': HEADERS,
+        'params': timestamp
+    }
     try:
-        response = requests.get(
-            ENDPOINT,
-            headers=HEADERS,
-            params=timestamp,
-        )
+        response = requests.get(**params)
     except requests.exceptions.RequestException as error:
-        logger.error(f'Эндпоинт {ENDPOINT} недоступен. Ошибка: {error}')
         raise ConnectionError(
-            f'Эндпоинт {ENDPOINT} недоступен. Ошибка: {error}'
+            f'Ошибка запроса к {ENDPOINT}. '
+            f'Параметры: {params}. Ошибка: {error}'
         )
     if response.status_code != HTTPStatus.OK:
-        logger.error(
-            f'Эндпоинт {ENDPOINT} недоступен. Код ответа API: '
-            f'{response.status_code}'
-        )
         raise APIResponseError(
             f'Эндпоинт {ENDPOINT} недоступен. Код ответа API: '
             f'{response.status_code}'
+            f'Параметры: {params}'
         )
 
     try:
         return response.json()
     except ValueError as error:
-        logger.error(f'Ошибка преобразования ответа API: {error}')
         raise ValueError(
             f'Ошибка преобразования ответа API: {error}'
         )
@@ -143,30 +138,29 @@ def check_response(response):
     to Python data types.
     """
     if not isinstance(response, dict):
-        logger.error('Ответ API не является словарём')
-        raise TypeError('Ответ API не является словарём')
+        raise TypeError(
+            f'Ответ API не является словарём. Получен тип:{type(response)}'
+        )
     for key in RESPONSE_KEYS:
         if key not in response:
-            logger.error(f'В ответе API нет ключа {key}')
             raise KeyError(f'В ответе API нет ключа {key}')
     if not isinstance(response['current_date'], int):
-        logger.error('Значение ключа "current_date" не является типом int')
         raise TypeError(
             'Значение ключа "current_date" не является типом int'
+            f'Значение ключа "current_date": {type(response["current_date"])}'
         )
     if not isinstance(response['homeworks'], list):
-        logger.error('Значение ключа "homeworks" не является типом list')
         raise TypeError(
             'Значение ключа "homeworks" не является типом list'
+            f'Значение ключа "homeworks": {type(response["homeworks"])}'
         )
     if not isinstance(response['homeworks'][0], dict):
-        logger.error('Домашняя работа представлена не словарём')
         raise TypeError(
-            'Домашняя работа представлена не словарём'
+            'Домашняя работа не является словарём.'
+            f'Получен тип {type(response["homeworks"][0])}'
         )
     for key in response['homeworks'][0]:
         if key not in HOMEWORK_KEYS:
-            logger.error(f'В объекте домашней работы нет ключа {key}')
             raise KeyError(
                 f'В объекте домашней работы нет ключа {key}'
             )
@@ -183,11 +177,9 @@ def parse_status(homework):
     try:
         homework_name = homework['homework_name']
     except KeyError:
-        logger.error('В ответе API нет ключа "homework_name"')
         raise KeyError('В ответе API нет ключа "homework_name"')
     status = homework['status']
     if status not in HOMEWORK_VERDICTS:
-        logger.error('Значение ключа "status" не соответствует ожиданиям')
         raise ValueError(
             'Значение ключа "status" не соответствует ожиданиям'
         )
@@ -198,12 +190,16 @@ def parse_status(homework):
 
 def main():
     """Основная логика работы бота."""
-    # Проверка токенов check_tokens()
-    check_tokens()
-    # Создаем объект класса бота
+    try:
+        check_tokens()
+    except MissingTokenError as error:
+        logger.critical(error, exc_info=True)
+        raise sys.exit()
+
     bot = TeleBot(token=TELEGRAM_TOKEN)
     previous_status = None
     previous_date_updated = None
+    last_error = None
 
     while True:
         try:
@@ -221,7 +217,16 @@ def main():
 
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
-            send_message(bot, message)
+            logger.error(message, exc_info=True)
+            if message != last_error:
+                try:
+                    send_message(bot, message)
+                except TelegramError:
+                    logger.error(
+                        'Не удалось отправить сообщение об ошибке в Telegram',
+                        exc_info=True
+                    )
+                last_error = message
 
         finally:
             time.sleep(RETRY_PERIOD)
