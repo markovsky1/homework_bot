@@ -197,7 +197,6 @@ def main():
         raise sys.exit()
 
     bot = TeleBot(token=TELEGRAM_TOKEN)
-    previous_status = None
     previous_date_updated = None
     last_error = None
 
@@ -206,26 +205,17 @@ def main():
             response = get_api_answer(PAYLOAD)
             check_response(response)
             homework = response['homeworks'][0]
-            homework_status = homework['status']
             date_updated = homework['date_updated']
             message = parse_status(homework)
-            if homework_status != previous_status:
+            if date_updated != previous_date_updated:
                 send_message(bot, message)
-                previous_status = homework_status
-            if previous_date_updated != date_updated:
-                date_updated = previous_date_updated
+                previous_date_updated = date_updated
 
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
             logger.error(message, exc_info=True)
             if message != last_error:
-                try:
-                    send_message(bot, message)
-                except TelegramError:
-                    logger.error(
-                        'Не удалось отправить сообщение об ошибке в Telegram',
-                        exc_info=True
-                    )
+                send_message(bot, message)
                 last_error = message
 
         finally:
