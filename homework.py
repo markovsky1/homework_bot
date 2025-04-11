@@ -28,7 +28,7 @@ RETRY_PERIOD = 600
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
 
-DAYS = 30
+DAYS = 14
 now = datetime.now()
 timestamp = int((now - timedelta(days=DAYS)).timestamp())
 PAYLOAD = {'from_date': timestamp}
@@ -204,6 +204,11 @@ def main():
         try:
             response = get_api_answer(PAYLOAD)
             check_response(response)
+            # test
+            if len(response['homeworks']) == 0:
+                logging.debug('Нет новых данных о проектах.')
+                previous_date_updated = None
+                last_error = None
             homework = response['homeworks'][0]
             date_updated = homework['date_updated']
             message = parse_status(homework)
