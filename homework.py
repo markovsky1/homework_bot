@@ -28,7 +28,7 @@ RETRY_PERIOD = 600
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
 
-DAYS = 14
+DAYS = 7
 now = datetime.now()
 timestamp = int((now - timedelta(days=DAYS)).timestamp())
 PAYLOAD = {'from_date': timestamp}
