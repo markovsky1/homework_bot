@@ -204,7 +204,6 @@ def main():
         try:
             response = get_api_answer(PAYLOAD)
             check_response(response)
-            # test
             if len(response['homeworks']) == 0:
                 logging.debug('Нет новых данных о проектах.')
                 previous_date_updated = None
